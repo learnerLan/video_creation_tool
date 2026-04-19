@@ -1,3 +1,9 @@
 imageio-ffmpeg>=0.5.0
 Pillow>=9.0.0
 numpy>=1.23.0
+
+# Step 1: 音声转写（日语）
+faster-whisper>=1.0.0
+
+# 旧版 Auto OCR 模式（jp_video_editor.py --auto，可选）
+# manga-ocr>=0.1.8

@@ -17,12 +17,17 @@ Dependencies (install first):
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
 from datetime import datetime
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
+
+# Fix Windows console encoding for Unicode characters
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
 
 
 # ─────────────────────────────────────────────
@@ -166,6 +171,26 @@ def draw_text_safe(draw, pos, text, font, fill):
         draw.text(pos, text, font=font, fill=fill)
 
 
+def wrap_text(draw, text, font, max_width):
+    """Split text into lines that each fit within max_width pixels."""
+    if not text:
+        return []
+    if draw.textbbox((0, 0), text, font=font)[2] <= max_width:
+        return [text]
+    lines = []
+    current = ""
+    for char in text:
+        test = current + char
+        if draw.textbbox((0, 0), test, font=font)[2] > max_width and current:
+            lines.append(current)
+            current = char
+        else:
+            current = test
+    if current:
+        lines.append(current)
+    return lines
+
+
 def create_vocab_overlay(width, height, vocabulary, font_path=None):
     """
     Semi-transparent panel for vocabulary.
@@ -232,12 +257,46 @@ def create_grammar_overlay(width, height, grammar, font_path=None):
     title_f, header_f, body_f, small_f = load_fonts(font_path, base)
     line_h = base + 8
 
-    lines_needed = 2 + len(grammar) * 4 + 2
-    panel_h = min(int(height * 0.65), lines_needed * line_h + 30)
     panel_w = int(width * 0.44)
+    avail_w_pattern  = panel_w - 12 - 12        # x=px+12, right margin=12
+    avail_w_indented = panel_w - 12 - 16 - 12   # indent=16
+
+    # ── 第一遍：预算所有行（含自动换行），用于计算 panel_h ──────────────────
+    tmp_draw = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
+    rows = []   # each entry: (text, color, font, indent) or None for spacer
+    for item in grammar:
+        pattern    = item.get("pattern", "")
+        connection = item.get("connection", "")
+        meaning    = item.get("meaning", "")
+        level      = item.get("level", "")
+
+        pattern_label = f"◆ {pattern}"
+        if level:
+            pattern_label += f" [{level}]"
+        rows.append((pattern_label, GRAMMAR_COLOR, body_f, 0))
+
+        if connection:
+            for line in wrap_text(tmp_draw, f"接続：{connection}", small_f, avail_w_indented):
+                rows.append((line, CONN_COLOR, small_f, 16))
+
+        if meaning:
+            for line in wrap_text(tmp_draw, f"→ {meaning}", small_f, avail_w_indented):
+                rows.append((line, MEANING_COLOR, small_f, 16))
+
+        rows.append(None)   # spacer between items
+
+    content_lines = sum(1 for r in rows if r is not None)
+    spacer_count  = sum(1 for r in rows if r is None)
+    header_h = (base + 10) + 8 + 10   # title + divider + top padding
+    panel_h = min(
+        int(height * 0.85),
+        header_h + content_lines * line_h + spacer_count * 6 + 10
+    )
+
     px = width - panel_w - 18
     py = 18
 
+    # ── 第二遍：绘制 ────────────────────────────────────────────────────────
     canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     panel = Image.new("RGBA", (panel_w, panel_h), PANEL_BG)
     canvas.paste(panel, (px, py), panel)
@@ -254,23 +313,13 @@ def create_grammar_overlay(width, height, grammar, font_path=None):
     draw.line([(x, y), (px + panel_w - 12, y)], fill=BORDER_COLOR, width=1)
     y += 8
 
-    for item in grammar:
-        pattern    = item.get("pattern", "")
-        connection = item.get("connection", "")
-        meaning    = item.get("meaning", "")
-
-        draw_text_safe(draw, (x, y), f"◆ {pattern}", body_f, GRAMMAR_COLOR)
-        y += line_h
-
-        if connection:
-            draw_text_safe(draw, (x + 16, y), f"接続：{connection}", small_f, CONN_COLOR)
+    for row in rows:
+        if row is None:
+            y += 6
+        else:
+            text, color, font, indent = row
+            draw_text_safe(draw, (x + indent, y), text, font, color)
             y += line_h
-
-        if meaning:
-            draw_text_safe(draw, (x + 16, y), f"→ {meaning}", small_f, MEANING_COLOR)
-            y += line_h
-
-        y += 6
         if y > py + panel_h - line_h:
             break
 
@@ -334,6 +383,94 @@ def create_combined_overlay(width, height, vocabulary, grammar, font_path=None):
         canvas = Image.alpha_composite(canvas, g_img)
 
     return canvas
+
+
+# ─────────────────────────────────────────────
+# Auto subtitle OCR + grammar matching
+# ─────────────────────────────────────────────
+
+def extract_subtitle_text(ffmpeg_exe, video_path, width, height, subtitle_cover_pct, duration, tmp_dir):
+    """
+    Extract frames from the subtitle region every 2 seconds, OCR them,
+    deduplicate consecutive identical lines, and return combined text.
+    Requires: manga-ocr  (pip install manga-ocr)
+    """
+    try:
+        from manga_ocr import MangaOcr
+    except ImportError:
+        raise RuntimeError(
+            "manga-ocr is required for --auto mode.\n"
+            "Install it with:  pip install manga-ocr"
+        )
+
+    sub_h = int(height * subtitle_cover_pct)
+    sub_y = height - sub_h
+    frames_dir = os.path.join(tmp_dir, "sub_frames")
+    os.makedirs(frames_dir, exist_ok=True)
+
+    # Extract 1 frame every 2 seconds, cropped to subtitle region only
+    cmd = [
+        ffmpeg_exe, "-y",
+        "-ss", "0", "-t", str(duration),
+        "-i", video_path,
+        "-vf", f"fps=0.5,crop={width}:{sub_h}:0:{sub_y}",
+        os.path.join(frames_dir, "frame_%04d.png"),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    # ffmpeg returns non-zero when no output file matches — ignore
+
+    frame_files = sorted(
+        f for f in os.listdir(frames_dir) if f.endswith(".png")
+    )
+    if not frame_files:
+        print("  [auto] No subtitle frames extracted.")
+        return ""
+
+    print(f"  [auto] OCR-ing {len(frame_files)} subtitle frames …")
+    mocr = MangaOcr()
+    lines = []
+    for fname in frame_files:
+        path = os.path.join(frames_dir, fname)
+        text = mocr(path).strip()
+        if text and (not lines or text != lines[-1]):   # deduplicate
+            lines.append(text)
+
+    combined = "\n".join(lines)
+    print(f"  [auto] Extracted {len(lines)} unique subtitle lines.\n")
+    return combined
+
+
+def auto_detect_config(subtitle_text, max_grammar=5, max_vocab=5):
+    """
+    Match N3+ grammar patterns and vocabulary against OCR'd subtitle text.
+    Returns {"vocabulary": [...], "grammar": [...]} ready for process_video.
+    """
+    from grammar_db import GRAMMAR_DB, VOCAB_DB
+
+    matched_grammar = []
+    for entry in GRAMMAR_DB:
+        if re.search(entry["regex"], subtitle_text):
+            matched_grammar.append({
+                "pattern":    entry["pattern"],
+                "connection": entry["connection"],
+                "meaning":    entry["meaning"],
+            })
+            if len(matched_grammar) >= max_grammar:
+                break
+
+    matched_vocab = []
+    for entry in VOCAB_DB:
+        if entry["word"] in subtitle_text:
+            matched_vocab.append({
+                "word":    entry["word"],
+                "reading": entry["reading"],
+                "meaning": entry["meaning"],
+                "level":   entry["level"],
+            })
+            if len(matched_vocab) >= max_vocab:
+                break
+
+    return {"vocabulary": matched_vocab, "grammar": matched_grammar}
 
 
 # ─────────────────────────────────────────────
@@ -544,12 +681,14 @@ Example config.json
     )
 
     parser.add_argument("input",  help="Input video file (MP4, MKV, etc.)")
-    parser.add_argument("--config",  "-c", required=True,
+    parser.add_argument("--config",  "-c", default=None,
                         help="JSON file with vocabulary and grammar lists")
+    parser.add_argument("--auto", "-a", action="store_true",
+                        help="Auto mode: OCR subtitle region and match N3+ grammar/vocab automatically")
     parser.add_argument("--duration", "-d", type=float, default=60,
                         help="Seconds to use from the video for each part (default: 60)")
     parser.add_argument("--subtitle-cover", type=float, default=0.13,
-                        help="Fraction of video height to black out for subtitles (default: 0.13)")
+                        help="Fraction of video height for subtitle region (default: 0.13)")
     parser.add_argument("--mode", choices=["split", "combined"], default="split",
                         help="split=vocab first half / grammar second half; "
                              "combined=both panels shown together (default: split)")
@@ -557,11 +696,10 @@ Example config.json
 
     args = parser.parse_args()
 
+    if not args.auto and not args.config:
+        parser.error("Provide --config <file> or use --auto for automatic subtitle detection.")
+
     # ── Directory layout ──────────────────────────────────────────────
-    # project_root/
-    #   video/         <- input videos
-    #   unsubtitled/   <- Part 1 output (subtitle-covered clip)
-    #   product/       <- final learning video
     base_dir = Path(__file__).parent
     unsubtitled_dir = base_dir / "unsubtitled"
     product_dir     = base_dir / "product"
@@ -573,12 +711,32 @@ Example config.json
     unsubtitled_path = unsubtitled_dir / f"{stem}_{ts}.mp4"
     output_path      = product_dir     / f"{stem}_learning_{ts}.mp4"
 
-    # Load config
-    with open(args.config, "r", encoding="utf-8") as f:
-        cfg = json.load(f)
+    ffmpeg_exe, ffprobe_exe = get_ffmpeg_paths()
+    print(f"FFmpeg : {ffmpeg_exe}\n")
 
-    vocabulary = cfg.get("vocabulary", [])
-    grammar    = cfg.get("grammar",    [])
+    # ── Load vocabulary & grammar ─────────────────────────────────────
+    if args.auto:
+        print("▶ Auto mode — extracting subtitles via OCR …")
+        width, height, video_dur, fps = get_video_info(ffprobe_exe, args.input)
+        clip_dur = min(args.duration, video_dur)
+        with tempfile.TemporaryDirectory() as ocr_tmp:
+            subtitle_text = extract_subtitle_text(
+                ffmpeg_exe, args.input, width, height,
+                args.subtitle_cover, clip_dur, ocr_tmp,
+            )
+        if not subtitle_text.strip():
+            print("  [auto] No subtitle text found — Part 2 will have no annotations.\n")
+            vocabulary, grammar = [], []
+        else:
+            cfg = auto_detect_config(subtitle_text)
+            vocabulary = cfg["vocabulary"]
+            grammar    = cfg["grammar"]
+            print(f"  [auto] Matched {len(vocabulary)} vocab items, {len(grammar)} grammar items.\n")
+    else:
+        with open(args.config, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+        vocabulary = cfg.get("vocabulary", [])
+        grammar    = cfg.get("grammar",    [])
 
     print(f"Vocabulary items : {len(vocabulary)}")
     print(f"Grammar items    : {len(grammar)}")
@@ -587,10 +745,6 @@ Example config.json
     print(f"Subtitle cover   : {args.subtitle_cover * 100:.0f}% of frame height")
     print(f"Unsubtitled  -> : {unsubtitled_path}")
     print(f"Product      -> : {output_path}\n")
-
-    ffmpeg_exe, ffprobe_exe = get_ffmpeg_paths()
-    print(f"FFmpeg : {ffmpeg_exe}")
-    print(f"FFprobe: {ffprobe_exe}\n")
 
     process_video(
         input_path=args.input,

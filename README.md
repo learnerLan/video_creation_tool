@@ -8,6 +8,8 @@
 | 过渡 | 1.5 秒 | "Next Part" 提示画面 |
 | Part 2 | ~1 分钟 | 原视频，叠加 **N3+ 单词 & 文法讲解** |
 
+**自动模式**：脚本会 OCR 识别视频里的硬字幕，自动匹配 N3/N2/N1 语法和词汇，无需手写 config 文件。
+
 ---
 
 ## 快速开始（macOS 双击运行）
@@ -88,6 +90,10 @@ product/test_learning_20260403_185221.mp4
 ## 命令行运行（进阶）
 
 ```bash
+# 自动模式（OCR 识别字幕 → 自动匹配 N3+ 语法）
+python3 jp_video_editor.py video/input.mp4 --auto
+
+# 手动模式（提供自己的词汇/语法 config）
 python3 jp_video_editor.py video/input.mp4 --config config_example.json
 ```
 
@@ -96,20 +102,27 @@ python3 jp_video_editor.py video/input.mp4 --config config_example.json
 | 参数 | 默认 | 说明 |
 |------|------|------|
 | `input` | — | 输入视频文件 |
-| `--config` / `-c` | — | JSON 配置文件路径（必填） |
+| `--auto` / `-a` | — | 自动模式：OCR 字幕 + 匹配 N3+ 语法（与 --config 二选一）|
+| `--config` / `-c` | — | 手动指定词汇/语法 JSON 文件 |
 | `--duration` / `-d` | `60` | 每段使用的视频秒数 |
-| `--subtitle-cover` | `0.13` | 字幕遮挡高度比例（0.10~0.20 常用） |
+| `--subtitle-cover` | `0.13` | 字幕区高度比例（0.10~0.20 常用） |
 | `--mode` | `split` | `split`=前半单词/后半文法；`combined`=左单词右文法同时显示 |
 
 ---
 
 ## 工作流建议
 
-1. 从日剧 / 动漫中截取 1 分钟片段
-2. 听一遍，找出 N3 以上的单词和文法（5 个左右）
-3. 填写 `config_example.json`（或新建一个 json 文件）
-4. 把视频放入 `video/`，双击 `run.command`
-5. 从 `product/` 取成品
+**自动模式（推荐）**
+1. 截取日剧 / 动漫片段（带硬字幕）
+2. 把视频放入 `video/`
+3. 双击 `run.command` — 自动 OCR 字幕、匹配 N3+ 语法、生成成品
+4. 从 `product/` 取成品
+
+**手动模式（自定义内容）**
+1. 截取视频片段
+2. 把视频放入 `video/`，填写自己的 `config.json`
+3. `python3 jp_video_editor.py video/xxx.mp4 --config config.json`
+4. 从 `product/` 取成品
 
 ---
 

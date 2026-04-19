@@ -1,61 +1,27 @@
 {
   "vocabulary": [
     {
-      "word": "確認",
-      "reading": "かくにん",
-      "meaning": "确认 / to confirm",
-      "level": "N3"
+      "word": "盥回し",
+      "reading": "たらいまわし",
+      "meaning": "踢皮球 / 被来回推诿",
+      "level": "N1",
+      "at": 32
     },
     {
-      "word": "緊張",
-      "reading": "きんちょう",
-      "meaning": "紧张 / nervous, tense",
-      "level": "N3"
-    },
-    {
-      "word": "諦める",
-      "reading": "あきらめる",
-      "meaning": "放弃 / to give up",
-      "level": "N3"
-    },
-    {
-      "word": "我慢する",
-      "reading": "がまんする",
-      "meaning": "忍耐 / to endure, to hold back",
-      "level": "N3"
-    },
-    {
-      "word": "仕方ない",
-      "reading": "しかたない",
-      "meaning": "没办法 / can't be helped",
-      "level": "N3"
+      "word": "迷い込んだ",
+      "reading": "まよいこんだ",
+      "meaning": "误入 / 走进迷路了",
+      "level": "N3",
+      "at": 20
     }
   ],
   "grammar": [
     {
-      "pattern": "〜てしまう",
-      "connection": "V-て形 ＋ しまう",
-      "meaning": "完了·遗憾：表示做完了某事（常带后悔）/ ended up doing"
-    },
-    {
-      "pattern": "〜ばよかった",
-      "connection": "V-ば形 ＋ よかった",
-      "meaning": "后悔：早知道就…好了 / should have done"
-    },
-    {
-      "pattern": "〜だけでなく",
-      "connection": "N / V普通形 ＋ だけでなく",
-      "meaning": "不只是… / not only … but also"
-    },
-    {
-      "pattern": "〜ようになる",
-      "connection": "V辞書形 / V-ない形 ＋ ようになる",
-      "meaning": "变化：渐渐变得能做… / come to do, become able to"
-    },
-    {
-      "pattern": "〜はずだ",
-      "connection": "V普通形 / N の ＋ はずだ",
-      "meaning": "推测·理应：应该是… / should be, supposed to"
+      "pattern": "〜ようにしなければ",
+      "connection": "V辞書形 ＋ ようにしなければ",
+      "meaning": "必须努力做到",
+      "level": "N3",
+      "at": 6
     }
   ]
 }

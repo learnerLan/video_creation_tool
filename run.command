@@ -1,5 +1,4 @@
 #!/bin/bash
-# 切换到脚本所在目录（双击时工作目录不固定，必须加这行）
 cd "$(dirname "$0")"
 
 echo "========================================"
@@ -7,27 +6,34 @@ echo "  Japanese Learning Video Editor"
 echo "========================================"
 echo ""
 
-# 检查 Python3
+# Check Python3
 if ! command -v python3 &> /dev/null; then
     echo "ERROR: 未找到 python3，请先安装 Python 3。"
     read -p "按 Enter 关闭..."
     exit 1
 fi
 
-# 检查依赖
+# Auto-install dependencies if missing
 python3 -c "import imageio_ffmpeg, PIL" 2>/dev/null
 if [ $? -ne 0 ]; then
-    echo "正在安装依赖..."
-    pip3 install -r requirements.txt
+    echo "正在安装基础依赖..."
+    pip3 install imageio-ffmpeg Pillow numpy
     echo ""
 fi
 
-# 处理 video/ 下所有 mp4
+python3 -c "import manga_ocr" 2>/dev/null
+if [ $? -ne 0 ]; then
+    echo "正在安装 manga-ocr（首次需要下载模型，约 400MB）..."
+    pip3 install manga-ocr
+    echo ""
+fi
+
+# Process all mp4 files in video/
 count=0
 for video in video/*.mp4; do
     [ -f "$video" ] || continue
     echo ">>> 处理: $video"
-    python3 jp_video_editor.py "$video" --config config_example.json
+    python3 jp_video_editor.py "$video" --auto
     echo ""
     count=$((count + 1))
 done
